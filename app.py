@@ -1,13 +1,13 @@
+import os
+from dotenv import load_dotenv
 import streamlit as st
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import PromptTemplate
-import os
-from dotenv import load_dotenv
-from openai import OpenAI
 from langchain.callbacks.base import BaseCallbackHandler
+from openai import OpenAI
 
-# Load environment variables
+# --- Load environment variables ---
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 client = OpenAI()
@@ -26,7 +26,7 @@ class StreamHandler(BaseCallbackHandler):
     def on_llm_new_token(self, token: str, **kwargs):
         self.text += token
         self.placeholder.markdown(
-            f'<div class="assistant-message"><strong>📘 Maths Tutor:</strong><br>{self.text}</div>',
+            f'<div class="assistant-message"><strong>📘 Vagaro Tutor:</strong><br>{self.text}</div>',
             unsafe_allow_html=True,
         )
 
@@ -48,17 +48,32 @@ def moderate_content(user_question):
         st.error(f"Moderation error: {e}")
         return False
 
-# --- Math Classification ---
-def is_question_math_related(question):
-    classifier_llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0.0, openai_api_key=openai_api_key)
-    prompt = f"""
-    Decide whether the following is a vagaro related question.
-
-    {question}
-
-    Respond with only YES or NO:
+# --- Vagaro-related Question Classifier ---
+def is_question_vagaro_related(question):
     """
-    return classifier_llm.invoke(prompt).content.strip().lower() == "yes"
+    Returns True if the question is related to Vagaro support.
+    """
+    classifier_llm = ChatOpenAI(
+        model_name="gpt-3.5-turbo",
+        temperature=0.0,
+        openai_api_key=openai_api_key
+    )
+
+    prompt = f"""
+You are a Vagaro support assistant. Decide if the following question is related
+to Vagaro support.
+
+Question:
+{question}
+
+Respond ONLY with 'YES' or 'NO', nothing else.
+"""
+    try:
+        response = classifier_llm.invoke(prompt).content.strip().lower()
+        return response.startswith("yes")  # catches variations like "Yes.", "YES!"
+    except Exception as e:
+        st.error(f"Error classifying question: {e}")
+        return False
 
 # --- Document Retrieval ---
 def get_relevant_docs(question, vectorstore, threshold=0.75):
@@ -77,18 +92,14 @@ def get_llm(callback):
 
 # --- Prompt Template ---
 prompt_template = PromptTemplate.from_template(""" 
-You are a helpful and friendly help desk assistant for vagaro.
+You are a helpful and friendly help desk assistant for Vagaro.
 
 You are given a question asked by customers.
-Your job is to explain the step by step process to answer the customer question**.
+Your job is to explain the step by step process to answer the customer question.
 
-- Do NOT introduce answer not present in the pdf.
-- If the pdf includes diagrams or hints at visual concepts, simulate them in Markdown (e.g., arrows, boxes, labeled steps).
+- Do NOT introduce answers not present in the pdf.
+- If the pdf includes diagrams or visual hints, simulate them in Markdown.
 - Stay aligned with the pdf step by step guide.
-
-Understand that customers do not ask direct question.
-They phrase it in the best way they understand, your job is to filter the pdf and give a perfect answer.
-So carefully read the question and understand then search the pdf and provide answer. 
 
 Pdf context:
 {context}
@@ -100,8 +111,8 @@ Your explanation:
 """)
 
 # --- Streamlit UI ---
-st.set_page_config(page_title="Maths Tutor", layout="wide")
-st.title("📘 Guided Maths Tutor Chatbot")
+st.set_page_config(page_title="📘 Vagaro Support Tutor", layout="wide")
+st.title("📘 Guided Vagaro Support Chatbot")
 
 # --- CSS Styling ---
 st.markdown("""
@@ -147,7 +158,7 @@ for msg in st.session_state.messages:
     if msg["role"] == "user":
         st.markdown(f'<div class="user-message"><strong>👤 You:</strong><br>{msg["content"]}</div>', unsafe_allow_html=True)
     else:
-        st.markdown(f'<div class="assistant-message"><strong>📘 Maths Tutor:</strong><br>{msg["content"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="assistant-message"><strong>📘 Vagaro Tutor:</strong><br>{msg["content"]}</div>', unsafe_allow_html=True)
 
 # --- Chat input ---
 user_question = st.chat_input("Type your question here...")
@@ -158,19 +169,20 @@ if user_question:
     st.markdown(f'<div class="user-message"><strong>👤 You:</strong><br>{user_question}</div>', unsafe_allow_html=True)
 
     # Handle polite greeting
-    if user_question.strip().lower() in ["hi", "hello", "hey", "good morning", "good afternoon", "good evening"]:
-        render_assistant_response("👋 Hello! I’m your help today in serving vagaro customer. Feel free to ask any question, and I’ll guide you through the steps.")
+    if is_polite_greeting(user_question):
+        render_assistant_response("👋 Hello! I’m your guide for Vagaro support. Feel free to ask any question, and I’ll walk you through the steps.")
     # Moderation check
     elif moderate_content(user_question):
         render_assistant_response("❌ Your input contains harmful content. Please revise it.")
-    elif not is_question_math_related(user_question):
-        render_assistant_response("❌ I can only help with **vagaro related** questions.")
+    # Vagaro question check
+    elif not is_question_vagaro_related(user_question):
+        render_assistant_response("❌ I can only help with **Vagaro support-related** questions.")
     else:
         vectorstore = load_vectorstore()
         docs = get_relevant_docs(user_question, vectorstore)
 
         if not docs:
-            render_assistant_response("❌ I couldn't find relevant answer.")
+            render_assistant_response("❌ I couldn't find a relevant answer in the documents.")
         else:
             context = "\n\n".join([doc.page_content for doc in docs])
             prompt = prompt_template.format(context=context, question=user_question)
